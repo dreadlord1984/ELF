@@ -256,7 +256,11 @@ void BoardFeature::extractAGZ(float* features) const {
 
   Stone player = _board->_next_player;
 
-  assert(history.size() <= MAX_NUM_AGZ_HISTORY);
+  if (history.size() > MAX_NUM_AGZ_HISTORY) {
+    logger_->info(
+        "#history.size() = {}, > {}", history.size(), MAX_NUM_AGZ_HISTORY);
+    assert(false);
+  }
 
   // Save the current board state to game state.
   int i = 0;

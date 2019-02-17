@@ -24,6 +24,7 @@
 #include "elf/comm/primitive.h"
 #include "elf/concurrency/ConcurrentQueue.h"
 #include "elf/concurrency/Counter.h"
+#include "elf/logging/IndexedLoggerFactory.h"
 #include "elf/utils/member_check.h"
 
 #include "tree_search_node.h"
@@ -67,10 +68,14 @@ class TreeSearchSingleThreadT {
   using SearchTree = SearchTreeT<State, Action>;
 
   TreeSearchSingleThreadT(int thread_id, const TSOptions& options)
-      : threadId_(thread_id), options_(options) {
+      : threadId_(thread_id),
+        options_(options),
+        logger_(elf::logging::getIndexedLogger(
+            "elf::ai::tree_search::TreeSearchSingleThreadT-",
+            "")) {
     if (options_.verbose) {
       std::string log_file =
-          "tree_search_" + std::to_string(thread_id) + ".txt";
+          options_.log_prefix + std::to_string(thread_id) + ".txt";
       output_.reset(new std::ofstream(log_file));
     }
   }
@@ -91,7 +96,7 @@ class TreeSearchSingleThreadT {
     Node* root = search_tree.getRootNode();
     if (root == nullptr || root->getStatePtr() == nullptr) {
       if (stop_search == nullptr || !stop_search->load()) {
-        std::cout << "[" << threadId_ << "] root node is nullptr!" << std::endl;
+        logger_->info("[{}] root node is nullptr!", threadId_);
       }
       return false;
     }
@@ -103,10 +108,11 @@ class TreeSearchSingleThreadT {
                << std::flush;
     }
 
-    for (int idx = 0; idx < num_rollout &&
-         (stop_search == nullptr || !stop_search->load());) {
+    for (int idx = 0;
+         idx < num_rollout && (stop_search == nullptr || !stop_search->load());
+         idx += options_.num_rollouts_per_batch) {
       // Start from the root and run one path
-      idx += batch_rollouts<Actor>(
+      batch_rollouts<Actor>(
           RunContext(run_id, idx, num_rollout), root, actor, search_tree);
     }
 
@@ -130,6 +136,8 @@ class TreeSearchSingleThreadT {
   // TODO: The weird variable name below needs to change (ssengupta@fb)
   elf::concurrency::ConcurrentQueue<int> runInfoWhenStateReady_;
   std::unique_ptr<std::ostream> output_;
+
+  std::shared_ptr<spdlog::logger> logger_;
 
   MEMBER_FUNC_CHECK(reward)
   template <
@@ -190,7 +198,7 @@ class TreeSearchSingleThreadT {
   }
 
   template <typename Actor>
-  size_t batch_rollouts(
+  void batch_rollouts(
       const RunContext& ctx,
       Node* root,
       Actor& actor,
@@ -212,7 +220,7 @@ class TreeSearchSingleThreadT {
     //   1. Other threads lock it
     //   2. Duplicated leaf.
     for (Traj& traj : trajs) {
-      if (traj.leaf->lockNodeForEvaluation()) {
+      if (traj.leaf->requestEvaluation()) {
         locked_leaves.push_back(traj.leaf);
         locked_states.push_back(traj.leaf->getStatePtr());
       }
@@ -231,7 +239,7 @@ class TreeSearchSingleThreadT {
     for (size_t j = 0; j < locked_leaves.size(); ++j) {
       // Now the node points to a recently created node.
       // Evaluate it and backpropagate.
-      locked_leaves[j]->setNodeEvaluationAndUnlock(resps[j]);
+      locked_leaves[j]->setEvaluation(resps[j]);
     }
 
     for (auto& traj_pair : traj_counts) {
@@ -239,7 +247,7 @@ class TreeSearchSingleThreadT {
       Traj* traj = traj_pair.second.first;
       int count = traj_pair.second.second;
 
-      leaf->waitForEvaluation();
+      leaf->waitEvaluation();
       float reward = get_reward(actor, leaf);
       // PRINT_TS("Reward: " << reward << " Start backprop");
 
@@ -251,8 +259,6 @@ class TreeSearchSingleThreadT {
     }
 
     printHelper(ctx, "Done backprop");
-    // Return the leaves that are actually expanded.
-    return locked_leaves.size();
   }
 
   template <typename Actor>
@@ -274,7 +280,6 @@ class TreeSearchSingleThreadT {
         break;
       }
 
-      printHelper(ctx, "No available action");
       // PRINT_TS(" Action: " << action);
 
       // Add virtual loss if there is any.
@@ -327,13 +332,16 @@ class TreeSearchT {
   using MCTSResult = MCTSResultT<Action>;
 
   TreeSearchT(const TSOptions& options, std::function<Actor*(int)> actor_gen)
-      : options_(options), stopSearch_(false) {
+      : options_(options),
+        stopSearch_(false),
+        logger_(elf::logging::getIndexedLogger(
+            "elf::ai::tree_search::TreeSearchT-",
+            "")) {
     for (int i = 0; i < options.num_threads; ++i) {
       treeSearches_.emplace_back(new TreeSearchSingleThread(i, options_));
       actors_.emplace_back(actor_gen(i));
     }
 
-    // cout << "#Thread: " << options.num_threads << endl;
     for (int i = 0; i < options.num_threads; ++i) {
       TreeSearchSingleThread* th = treeSearches_[i].get();
       threadPool_.emplace_back(std::thread{[i, this, th]() {
@@ -376,10 +384,7 @@ class TreeSearchT {
     return searchTree_.printTree();
   }
 
-  MCTSResult runPolicyOnly(const State& /*root_state*/) {
-    // TODO Policy only doesn't work.
-    assert(false);
-    /*
+  MCTSResult runPolicyOnly(const State& root_state) {
     if (actors_.empty() || treeSearches_.empty()) {
       throw std::range_error(
           "TreeSearch::runPolicyOnly works when there is at least one thread");
@@ -388,15 +393,17 @@ class TreeSearchT {
 
     // Some hack here.
     Node* root = searchTree_.getRootNode();
-    treeSearches_[0]->visit(*actors_[0], root);
 
-    // return StrongestPrior(root->getStateActions());
-    */
+    if (!root->isVisited()) {
+      NodeResponseT<Action> resp;
+      actors_[0]->evaluate(*root->getStatePtr(), &resp);
+      root->setEvaluation(resp);
+    }
 
     MCTSResult result;
-    // result.action_rank_method = MCTSResult::PRIOR;
-    // result.addActions(root->getStateActions());
-
+    result.action_rank_method = MCTSResult::PRIOR;
+    result.addActions(root->getStateActions());
+    result.root_value = root->getValue();
     return result;
   }
 
@@ -460,6 +467,8 @@ class TreeSearchT {
   elf::concurrency::Counter<size_t> treeReady_;
   elf::concurrency::Counter<size_t> countStoppedThreads_;
 
+  std::shared_ptr<spdlog::logger> logger_;
+
   void notifySearches(int num_rollout) {
     for (size_t i = 0; i < treeSearches_.size(); ++i) {
       treeSearches_[i]->notifyReady(num_rollout);
@@ -486,12 +495,13 @@ class TreeSearchT {
   MCTSResult chooseAction() const {
     const Node* root = searchTree_.getRootNode();
     if (root == nullptr) {
-      std::cout << "TreeSearch::root cannot be null!" << std::endl;
       throw std::range_error("TreeSearch::root cannot be null!");
     }
 
     // Pick the best solution.
     MCTSResult result;
+    result.root_value = root->getValue();
+
     // MCTSResult result2;
     if (options_.pick_method == "strongest_prior") {
       result.action_rank_method = MCTSResult::PRIOR;

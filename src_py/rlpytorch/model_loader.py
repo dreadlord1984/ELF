@@ -8,6 +8,7 @@ import importlib
 import pprint
 import random
 import time
+import torch
 import warnings
 
 from elf.options import import_options, PyOptionSpec
@@ -15,10 +16,6 @@ from elf import logging
 from .model_interface import ModelInterface
 from .sampler import Sampler
 from .utils.fp16_utils import FP16Model
-
-
-_logger_factory = logging.IndexedLoggerFactory(
-    lambda name: logging.stdout_color_mt(name))
 
 
 def load_module(mod):
@@ -93,7 +90,7 @@ class ModelLoader(object):
         if logger is not None:
             self.logger = logger
         else:
-            self.logger = _logger_factory.makeLogger(
+            self.logger = logging.getIndexedLogger(
                 'rlpytorch.model_loader.ModelLoader-',
                 f'-model_index{model_idx}')
 
@@ -178,7 +175,9 @@ class ModelLoader(object):
             old_step = model.step
             model = FP16Model(self.option_map_for_model, params, model)
             model.step = old_step
-        if self.options.gpu is not None and self.options.gpu >= 0:
+        if torch.cuda.is_available() and \
+           self.options.gpu is not None and \
+           self.options.gpu >= 0:
             model.cuda(self.options.gpu)
 
         return model
@@ -188,9 +187,6 @@ class ModelLoader(object):
             ('_on_get_args is deprecated, get rid of this as soon as old '
              'model files are no longer needed'),
             DeprecationWarning)
-
-
-_load_env_logger = logging.stdout_color_mt('rlpytorch.model_loader.load_env')
 
 
 def load_env(
@@ -219,7 +215,7 @@ def load_env(
             ``method``: Learning method used
             ``model_loaders``: loaders for model
     """
-    logger = _load_env_logger
+    logger = logging.getIndexedLogger('rlpytorch.model_loader.load_env', '')
     logger.info('Loading env')
 
     game_loader_class = load_module(envs["game"]).Loader

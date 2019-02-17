@@ -23,9 +23,10 @@
  *
  *  private:
  *   static IndexedLoggerFactory* getLoggerFactory() {
- *     IndexedLoggerFactory factory([](const std::string& name) {
- *       return spdlog::stdout_color_mt(name);
+ *     static IndexedLoggerFactory factory([](const std::string& name) {
+ *       return spdlog::stderr_color_mt(name);
  *     });
+ *     return &factory;
  *   }
  *
  *   std::shared_ptr<spdlog::logger> logger_;
@@ -33,6 +34,10 @@
  * };
  *
  * }
+ *
+ * WARNING: Use this *only* when you are able to guarantee a bounded number of
+ * object instantiations. This class will automatically enforce an upper bound
+ * of a few thousand.
  */
 
 #pragma once
@@ -67,6 +72,10 @@ class IndexedLoggerFactory {
   CreatorT creator_;
   std::atomic_size_t counter_;
 };
+
+std::shared_ptr<spdlog::logger> getIndexedLogger(
+    const std::string& prefix,
+    const std::string& suffix);
 
 } // namespace logging
 } // namespace elf

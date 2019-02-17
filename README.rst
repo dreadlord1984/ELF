@@ -10,9 +10,15 @@
 ELF
 ===
 
-ELF is an Extensive, Lightweight, and Flexible platform for game research. We have used it to build our Go playing bot, ELF OpenGo, which achieved a 14-0 record versus four global top-30 players in April 2018.
+ELF is an Extensive, Lightweight, and Flexible platform for game research. We have used it to build our Go playing bot, `ELF OpenGo`__, which achieved a 14-0 record versus four global top-30 players in April 2018. The final score is 20-0 (each professional Go player plays 5 games).
 
-This version is a work-in-progress successor to the `original ELF platform`__.
+__ https://ai.facebook.com/blog/open-sourcing-new-elf-opengo-bot-and-go-research/
+
+Please refer to `our website`__ for a full overview of ELF OpenGo-related resources, including pretrained models, numerous datasets, and a comprehensive visualization of human Go games throughout history leveraging ELF OpenGo's analysis capabilities.
+
+__ https://facebook.ai/developers/tools/elf-opengo
+
+This version is a successor to the `original ELF platform`__.
 
 __ https://github.com/facebookresearch/ELF
 
@@ -22,7 +28,9 @@ __ https://github.com/facebookresearch/ELF
 - The code quality and documentation are quite lacking, and much of the code might still feel "in-progress".
 - There are quite a few hacks made specifically for our systems and infrastructure.
 
-Although we intend to release significant improvements over the next month, we're a small team so your patience is greatly appreciated.
+|build|
+
+.. |build| image:: https://circleci.com/gh/pytorch/ELF.png?style=shield
 
 License
 =======
@@ -42,17 +50,21 @@ If you use ELF in your research, please consider citing the original NIPS paper 
       year = {2017}
     }
 
-If you use ELF OpenGo or OpenGo-like functionality, please consider citing the library as follows::
+If you use ELF OpenGo or OpenGo-like functionality, please consider citing the technical report as follows::
 
-    @misc{ELFOpenGo2018,
-      author = {Yuandong Tian and {Jerry Ma*} and {Qucheng Gong*} and Shubho Sengupta and Zhuoyuan Chen and C. Lawrence Zitnick},
-      title = {ELF OpenGo},
-      year = {2018},
-      journal = {GitHub repository},
-      howpublished = {\url{https://github.com/pytorch/ELF}}
-    }
+   @article{tian2019elfopengo,
+     author = {{Yuandong Tian} and {Jerry Ma*} and {Qucheng Gong*} and {Shubho Sengupta*} and
+               {Zhuoyuan Chen} and {James Pinkerton} and {C. Lawrence Zitnick}},
+     title     = {ELF OpenGo: An Analysis and Open Reimplementation of AlphaZero},
+     journal   = {CoRR},
+     volume    = {abs/1902.04522},
+     year      = {2019},
+     url       = {http://arxiv.org/abs/1902.04522},
+     archivePrefix = {arXiv},
+     eprint    = {1902.04522}
+   }
 
-\* Qucheng Gong and Jerry Ma equally contributed as second authors.
+\* Equal contribution.
 
 \*\* We also thank Yuxin Wu for his help on this project.
 
@@ -62,10 +74,10 @@ Dependencies
 We run ELF using:
 
 - Ubuntu **18.04**
-- Python **3.6**
+- Python **3.7**
 - GCC **7.3**
-- CUDA **9.0**
-- CUDNN **7.0**
+- CUDA **10.0**
+- CUDNN **7.3**
 - NCCL **2.1.2**
 
 At the moment, this is the only supported environment. Other environments may also work, but we unfortunately do not have the manpower to investigate compatibility issues.
@@ -78,11 +90,11 @@ Here are the dependency installation commands for Ubuntu 18.04 and conda::
     # From the project root
     git submodule sync && git submodule update --init --recursive
 
-You also need to install PyTorch from source (see instructions `here`__). As an alternative, you can install the nightly build (the necessary changes will soon make their way into stable)::
+You also need to install PyTorch 1.0.0 or later::
 
-    conda install -c pytorch pytorch-nightly
+    conda install pytorch torchvision cudatoolkit=10.0 -c pytorch
 
-__ https://github.com/pytorch/pytorch#from-source
+A Dockerfile has been provided if you wish to build ELF using Docker.
 
 Building
 ========
@@ -123,10 +135,34 @@ Here is a basic set of commands to run and play the bot via the GTP protocol:
 
 1) Build ELF and run ``source scripts/devmode_set_pythonpath.sh`` as described above.
 
-2) Train a model, or grab a pretrained model from the repository's Github "Releases" tab.
+2) Train a model, or grab a `pretrained model`_.
 
 3) Change directory to ``scripts/elfgames/go/``
 
-4) Run ``./gtp.sh path/to/modelfile.bin --verbose --gpu 0 --num_block 20 --dim 224 --mcts_puct 1.50 --batchsize 16 --mcts_rollout_per_batch 16 --mcts_threads 2 --mcts_rollout_per_thread 8192 --resign_thres 0.05 --mcts_virtual_loss 1``
+4) Run ``./gtp.sh path/to/modelfile.bin --verbose --gpu 0 --num_block 20 --dim 256 --mcts_puct 1.50 --batchsize 16 --mcts_rollout_per_batch 16 --mcts_threads 2 --mcts_rollout_per_thread 8192 --resign_thres 0.05 --mcts_virtual_loss 1``
 
 We've found that the above settings work well for playing the bot. You may change ``mcts_rollout_per_thread`` to tune the thinking time per move.
+
+After the environment is set up and the model is loaded, you can start to type gtp commands to get the response from the engine.
+
+Analysis mode
+-------------
+
+Here is the command to analyze an existing sgf file:
+
+1) Build ELF and run ``source scripts/devmode_set_pythonpath.sh`` as described above.
+
+2) Train a model, or grab a `pretrained model`_.
+
+3) Change directory to ``scripts/elfgames/go/``
+
+4) Run ``./analysis.sh /path/to/model --preload_sgf /path/to/sgf --preload_sgf_move_to [move_number] --dump_record_prefix [tree] --verbose --gpu 0 --mcts_puct 1.50 --batchsize 16 --mcts_rollout_per_batch 16 --mcts_threads 2 --mcts_rollout_per_thread 8192 --resign_thres 0.0 --mcts_virtual_loss 1 --num_games 1``
+
+The settings for rollouts are similar as above. The process should run automatically after loading the environment, models and previous moves. You should see the move suggested by the AI after each move, along with its value and prior. This process will also generate a lot of tree files, prefixed with ``tree`` (you can change it with ``--dump_record_prefix`` option above.) The tree files will contain the full search at each move along with its prior and value. To abort the process simply kill it as the current implementation will run it to the end of the game.
+
+.. _pretrained model: https://dl.fbaipublicfiles.com/elfopengo/pretrained_models/pretrained-go-19x19-v2.bin
+
+Ladder tests
+============
+
+We provide a collection of just over 100 ladder scenarios in the ``ladder_suite/`` directory.

@@ -26,10 +26,10 @@ target_compile_definitions(elf PUBLIC
     GIT_COMMIT_HASH=${GIT_COMMIT_HASH}
     GIT_STAGED=${GIT_STAGED_STRING}
 )
+
 target_link_libraries(elf PUBLIC
     #${Boost_LIBRARIES}
     concurrentqueue
-    cppzmq
     nlohmann_json
     pybind11
     $<BUILD_INTERFACE:${PYTHON_LIBRARIES}>

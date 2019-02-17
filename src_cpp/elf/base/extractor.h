@@ -18,6 +18,8 @@
 
 #include "common.h"
 
+#include "elf/logging/IndexedLoggerFactory.h"
+
 // This file exists to bind functionss of the form f(State, MemoryAddress).
 // to its arguments
 // State usually is game state that comes from clients and MemoryAddress is
@@ -450,7 +452,7 @@ struct FuncsWithState {
         funcs.state_to_mem_funcs =
             _MergePackage(pkg1.state_to_mem_funcs,
                           pkg2.state_to_mem_funcs);
-        funcs.mem_to_state_funcs = 
+        funcs.mem_to_state_funcs =
             _MergePackage(pkg1.mem_to_state_funcs,
                           pkg2.mem_to_state_funcs);
         return funcs;
@@ -469,6 +471,9 @@ class ClassFieldT;
 //
 class Extractor {
  public:
+  Extractor()
+      : logger_(elf::logging::getIndexedLogger("elf::base::Extractor-", "")) {}
+
   template <typename T>
   FuncMapT<T>& addField(const std::string& key) {
     auto& f = fields_[key];
@@ -554,8 +559,7 @@ class Extractor {
     for (const std::string& k : keys) {
       auto it = fields_.find(k);
       if (it == fields_.end()) {
-        // TODO: This should be Google log (ssengupta@fb)
-        std::cout << "Warning! key[" << k << "] is missing!" << std::endl;
+        logger_->error("Warning! key[{}] is missing!", k);
       } else {
         pointers.emplace(k, AnyP(*it->second));
       }
@@ -566,6 +570,7 @@ class Extractor {
  private:
   // A bunch of pointer to Field.
   std::unordered_map<std::string, std::unique_ptr<FuncMapBase>> fields_;
+  std::shared_ptr<spdlog::logger> logger_;
 };
 
 template <typename S>
@@ -573,7 +578,10 @@ class ClassFieldT {
  public:
   using ClassField = ClassFieldT<S>;
 
-  ClassFieldT(Extractor* ext) : ext_(ext) {}
+  ClassFieldT(Extractor* ext)
+      : ext_(ext),
+        logger_(elf::logging::getIndexedLogger("elf::base::ClassFieldT-", "")) {
+  }
 
   template <typename T>
   ClassField& addFunction(
@@ -607,16 +615,24 @@ class ClassFieldT {
 
  private:
   Extractor* ext_;
+  std::shared_ptr<spdlog::logger> logger_;
 
   template <typename T>
   FuncMapT<T>* get(const std::string& key) {
     FuncMapT<T>* f = ext_->getFunctions<T>(key);
-    assert(f != nullptr);
+    if (f == nullptr) {
+      logger_->error("ClassFieldT: cannot find {}", key);
+      assert(false);
+    }
     return f;
   }
 
   FuncMapBase* get(const std::string& key) {
     FuncMapBase* f = ext_->getFunctions(key);
+    if (f == nullptr) {
+      logger_->error("ClassFieldT: cannot find {}", key);
+      assert(false);
+    }
     assert(f != nullptr);
     return f;
   }
